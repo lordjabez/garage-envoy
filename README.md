@@ -10,7 +10,7 @@ Hardware
 - 4GB SD card
 - 5.25v DC power adapter
 - 5v two channel relay
-- magentic sensors x 2
+- magnetic sensors x 2
 
 Software
 ========
