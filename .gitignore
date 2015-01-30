@@ -52,3 +52,8 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Ionic folders
+node_modules/
+platforms/
+plugins/
