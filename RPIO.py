@@ -30,3 +30,7 @@ def add_interrupt_callback(pin, mode, debounce_timeout_ms=0):
 
 def wait_for_interrupts(threaded):
     pass
+
+
+def cleanup():
+    pass
