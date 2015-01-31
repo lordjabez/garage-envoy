@@ -19,7 +19,7 @@ angular.module('garageEnvoyApp', ['ionic'])
     $scope.triggerLabel = 'Trigger Door';
 
     var getStateEvents = function() {
-        $http.get('/events?t=state&n=10')
+        $http.get('/events?t=state&n=20')
             .success(function(data) {
                 $scope.stateEvents = data.events;
                 state = $scope.stateEvents.slice(-1)[0].name;
