@@ -1,1 +1,14 @@
-/* Empty. Add your own CSS if you like */
+button {
+    text-transform: uppercase;
+}
+
+h2 {
+    float: left;
+    text-transform: uppercase;
+}
+
+p {
+    text-align: right;
+    font-size: small;
+    font-style: italic;
+}
