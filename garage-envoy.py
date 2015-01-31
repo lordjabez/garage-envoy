@@ -46,6 +46,8 @@ else:
     logging.basicConfig(format=logformat, level=loglevel)
 
 
+# Remember the two most recent events so the event
+# log file doesn't have to be read every time.
 thisevent = None
 prevevent = None
 
@@ -189,20 +191,29 @@ def getfile(filename='index.html'):
     return response
 
 
+# Use logical numbering because that's the only
+# thing compatible with the interrupt callbacks.
 RPIO.setmode(RPIO.BCM)
 
+# Set up the trigger output pin and ensure it is set to True, i.e. relay open.
 RPIO.setup(TRIGGER_PIN, RPIO.OUT)
 RPIO.output(TRIGGER_PIN, True)
 
+# Set up callbacks that fire when sensor state changes.
 RPIO.add_interrupt_callback(OPEN_SENSOR, handleopen, debounce_timeout_ms=100)
 RPIO.add_interrupt_callback(CLOSED_SENSOR, handleclosed, debounce_timeout_ms=100)
 
+# An additional setup call is required to ensure the pullup state
+# is set properly. Since the sensors are wired as normally closed
+# this allows the "magswitch closed" state to read as true.
 RPIO.setup(OPEN_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
 RPIO.setup(CLOSED_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
 
+# Grab the initial state of each of the sensors.
 handleopen(OPEN_SENSOR, RPIO.input(OPEN_SENSOR))
 handleclosed(CLOSED_SENSOR, RPIO.input(CLOSED_SENSOR))
 
+# Start the thread that watches for events and calls the interrupt handlers.
 RPIO.wait_for_interrupts(threaded=True)
 
 
@@ -211,4 +222,5 @@ logging.getLogger('waitress').setLevel(loglevel)
 bottle.run(server='waitress', host='0.0.0.0', port=80, quiet=(not args.debug), debug=args.debug)
 
 
+# Release the GPIO resources at exit.
 RPIO.cleanup()
