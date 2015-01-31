@@ -118,7 +118,7 @@ def logevent(type, name, value=None):
     global thisevent
     global prevevent
     prevevent = thisevent
-    thisevent = {'time': time.time(), 'type': type, 'name': name, 'value': value}
+    thisevent = {'time': int(time.time() * 1000), 'type': type, 'name': name, 'value': value}
     writeevent(thisevent)
 
 
