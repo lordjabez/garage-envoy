@@ -138,7 +138,9 @@ def logstate():
     elif istrigger(thisevent):
         if isclosing(prevevent) or ishalfclosed(prevevent):
             logevent('state', 'opening')
-        elif isopening(prevevent) or ishalfopen(prevevent):
+        elif isopening(prevevent):
+            logevent('state', 'half-open')
+        elif ishalfopen(prevevent):
             logevent('state', 'closing')
     elif not isrecent(thisevent):
         if isopening(thisevent):
