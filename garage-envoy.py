@@ -6,7 +6,6 @@ import argparse
 import json
 import logging
 import logging.handlers
-import threading
 import time
 
 # Additional library imports
@@ -14,8 +13,8 @@ import bottle
 import RPIO
 
 
-# The event log is stored in a flat file.
-EVENT_LOG_FILENAME = 'events.log'
+# The state history is stored in a flat file.
+HISTORY_FILENAME = 'history.log'
 
 
 # These are logical pin numbers based on the Broadcom
@@ -23,10 +22,7 @@ EVENT_LOG_FILENAME = 'events.log'
 TRIGGER_PIN = 17
 OPEN_SENSOR = 25
 CLOSED_SENSOR = 24
-
-# The max time it takes the garage door to open/close in seconds.
-# This value is used to determine door state from sensor events.
-DOOR_TIME = 15.0
+VIBRATION_SENSOR = 28
 
 
 # Parse the command line parameters.
@@ -46,131 +42,120 @@ else:
     logging.basicConfig(format=logformat, level=loglevel)
 
 
-# Remember the two most recent events so the event
-# log file doesn't have to be read every time.
-thisevent = None
-prevevent = None
+# Remember the most recent state so the history file doesn't
+# require parsing whenever state transitions take place.
+currstate = {'name': None, 'time': 0.0}
 
 
-def isrecent(event):
-    recenttime = time.time() - DOOR_TIME
-    return event['time'] > recenttime
+# Vibration is measured by checking the delta time between the
+# most recent and the previous statechange. If its less than this
+# threshold in seconds, the sensor is vibrating, otherwise it is not.
+VIBRATION_DELTA = 1.0
+
+# Gotta remember the last vibration values for the above to work.
+lastvibrationstatus = False
+lastvibrationtime = 0.0
 
 
-def issensor(event):
-    return event['type'] == 'sensor'
+def readhistory(num=0):
+    """Get state history items from.
+    @param num: The number of items to read
+    @return: List of state items
+    """
+    with open(HISTORY_FILENAME, 'r') as historyfile:
+        history = [json.loads(line) for line in historyfile]
+    return history[-num:]
 
 
-def isstate(event):
-    return event['type'] == 'state'
+def writehistory(state):
+    """Write a state item to the history file.
+    @param state: The state object to write
+    """
+    with open(HISTORY_FILENAME, 'a') as historyfile:
+        historyfile.write(json.dumps(state) + '\n')
 
 
-def istransient(event):
-    return event['type'] == 'state' and event['name'].endswith('ing')
+def updatestate(name):
+    """Update the current state.
+    @param name: The name of the new state
+    """
+    currstate = {'time': int(time.time() * 1000), 'name': name}
+    writehistory(currstate)
 
 
-def isopening(event):
-    return event['type'] == 'state' and event['name'] == 'opening'
-
-
-def isclosing(event):
-    return event['type'] == 'state' and event['name'] == 'closing'
-
-
-def ishalfopen(event):
-    return isstate(event) and event['name'] == 'half-open'
-
-
-def ishalfclosed(event):
-    return isstate(event) and event['name'] == 'half-closed'
-
-
-def isopen(event):
-    return issensor(event) and event['name'] == 'open'
-
-
-def isclosed(event):
-    return issensor(event) and event['name'] == 'closed'
-
-
-def istrigger(event):
-    return issensor(event) and event['name'] == 'trigger'
-
-
-def istrue(event):
-    return issensor(event) and event.get('value', False)
-
-
-def readevents(num=0, type=None):
-    with open(EVENT_LOG_FILENAME, 'r') as eventfile:
-        events = [json.loads(line) for line in eventfile]
-    if type:
-        events = [e for e in events if e['type'] == type]
-    return events[-num:]
-
-
-def writeevent(event):
-    with open(EVENT_LOG_FILENAME, 'a') as eventfile:
-        eventfile.write(json.dumps(event) + '\n')
-
-
-def logevent(type, name, value=None):
-    global thisevent
-    global prevevent
-    prevevent = thisevent
-    thisevent = {'time': int(time.time() * 1000), 'type': type, 'name': name, 'value': value}
-    writeevent(thisevent)
-
-
-def logstate():
-    global thisevent
-    global prevevent
-    if isopen(thisevent):
-        if istrue(thisevent):
-            logevent('state', 'open')
+def evaluatestate(sensor, status):
+    """Determine the new state given a sensor event.
+    @param sensor: The sensor event name
+    @param status: The value of the sensor
+    """
+    # The open and closed sensors authoritatively determine state
+    if sensor == 'open':
+        updatestate('open' if status else 'closing')
+    elif sensor == 'closed':
+        updatestate('closed' if status else 'opening')
+    # Otherwise fall back to the vibration sensor, but only override
+    # the current state if the door is neither open nor closed.
+    elif sensor == 'vibration':
+        if status:
+            if currstate.get('name') == 'half-open':
+                updatestate('closing')
+            elif currstate.get('name') == 'half-closed':
+                updatestate('opening')
         else:
-            logevent('state', 'closing')
-    elif isclosed(thisevent):
-        if istrue(thisevent):
-            logevent('state', 'closed')
-        else:
-            logevent('state', 'opening')
-    elif istrigger(thisevent):
-        if isclosing(prevevent) or ishalfclosed(prevevent):
-            logevent('state', 'opening')
-        elif isopening(prevevent):
-            logevent('state', 'half-open')
-        elif ishalfopen(prevevent):
-            logevent('state', 'closing')
-    elif not isrecent(thisevent):
-        if isopening(thisevent):
-            logevent('state', 'half-open')
-        elif isclosing(thisevent):
-            logevent('state', 'half-closed')
+            if currstate.get('name') == 'opening':
+                updatestate('half-open')
+            elif currstate.get('name') == 'closing':
+                updatestate('half-closed')
 
 
-def logstatelater():
-    threading.Timer(DOOR_TIME, logstate).start()
+def handleopen(id, value):
+    """
+    Process the change of the open sensor.
+    @param id: The GPIO pin identifier for the sensor (ignored)
+    @param value: The GPIO pin value where 0 = open and 1 = closed
+    """
+    status = value != 0
+    evaluatestate('open', status)
+    logging.info('Open sensor changed to ' + str(status))
 
 
-def handleopen(_, value):
-    logevent('sensor', 'open', value != 0)
-    logstate()
-    logstatelater()
+def handleclosed(id, value):
+    """
+    Process the change of the closed sensor.
+    @param id: The GPIO pin identifier for the sensor (ignored)
+    @param value: The GPIO pin value where 0 = open and 1 = closed
+    """
+    status = value != 0
+    evaluatestate('closed', status)
+    logging.info('Closed sensor changed to ' + str(status))
 
 
-def handleclosed(_, value):
-    logevent('sensor', 'closed', value != 0)
-    logstate()
-    logstatelater()
+def handlevibration(id, value):
+    """
+    Process the change of the vibration sensor.
+    @param id: The GPIO pin identifier for the sensor (ignored)
+    @param value: The GPIO pin value (ignored)
+    """
+    global lastvibrationstatus
+    global lastvibrationtime
+    # Determine the vibration state by checking to see how
+    # long it's been since the last vibration event. If the
+    # delta is small enough, the sensor is vibrating.
+    now = time.time()
+    status = (now - lastvibrationtime) < VIBRATION_DELTA
+    lastvibrationtime = now
+    # Only re-evaluate state if the vibration state actually changes.
+    if status != lastvibrationstatus:
+        evaluatestate('vibration', status)
+        logging.info('Vibration sensor changed to ' + str(status))
 
 
 def handletrigger():
-    logevent('sensor', 'trigger')
-    logstate()
+    """Figuratively 'press the door button' by briefly closing the relay."""
     RPIO.output(TRIGGER_PIN, False)
     time.sleep(0.2)
     RPIO.output(TRIGGER_PIN, True)
+    logging.info('Trigger occurred')
 
 
 @bottle.post('/_trigger')
@@ -178,11 +163,10 @@ def posttrigger():
     handletrigger()
 
 
-@bottle.get('/events')
-def getevents():
+@bottle.get('/history')
+def gethistory():
     num = int(bottle.request.query.get('n') or 0)
-    type = bottle.request.query.get('t')
-    return {'events': readevents(num, type)}
+    return {'history': readhistory(num)}
 
 
 @bottle.get('/')
@@ -193,36 +177,50 @@ def getfile(filename='index.html'):
     return response
 
 
-# Use logical numbering because that's the only
-# thing compatible with the interrupt callbacks.
-RPIO.setmode(RPIO.BCM)
+def setupgpio():
+    """Perform all necessary GPIO initialization."""
 
-# Set up the trigger output pin and ensure it is set to True, i.e. relay open.
-RPIO.setup(TRIGGER_PIN, RPIO.OUT)
-RPIO.output(TRIGGER_PIN, True)
+    # Use logical numbering because that's the only
+    # thing compatible with the interrupt callbacks.
+    RPIO.setmode(RPIO.BCM)
 
-# Set up callbacks that fire when sensor state changes.
-RPIO.add_interrupt_callback(OPEN_SENSOR, handleopen, debounce_timeout_ms=100)
-RPIO.add_interrupt_callback(CLOSED_SENSOR, handleclosed, debounce_timeout_ms=100)
+    # Set up the trigger output pin and ensure it is set to True, i.e. relay open.
+    RPIO.setup(TRIGGER_PIN, RPIO.OUT)
+    RPIO.output(TRIGGER_PIN, True)
 
-# An additional setup call is required to ensure the pullup state
-# is set properly. Since the sensors are wired as normally closed
-# this allows the "magswitch closed" state to read as true.
-RPIO.setup(OPEN_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
-RPIO.setup(CLOSED_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
+    # Set up callbacks that fire when sensor state changes. Note the
+    # smaller debounce on the vibration pin. Using a larger value would
+    # suppress the very small changes the code is trying to detect.
+    RPIO.add_interrupt_callback(OPEN_SENSOR, handleopen, debounce_timeout_ms=100)
+    RPIO.add_interrupt_callback(CLOSED_SENSOR, handleclosed, debounce_timeout_ms=100)
+    RPIO.add_interrupt_callback(VIBRATION_SENSOR, handlevibration, debounce_timeout_ms=20)
 
-# Grab the initial state of each of the sensors.
-handleopen(OPEN_SENSOR, RPIO.input(OPEN_SENSOR))
-handleclosed(CLOSED_SENSOR, RPIO.input(CLOSED_SENSOR))
+    # An additional setup call is required to ensure the pullup state
+    # is set properly. Since the sensors are wired as normally closed
+    # this allows the "switch closed" state to read as true.
+    RPIO.setup(OPEN_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
+    RPIO.setup(CLOSED_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
+    RPIO.setup(VIBRATION_SENSOR, RPIO.IN, pull_up_down=RPIO.PUD_UP)
 
-# Start the thread that watches for events and calls the interrupt handlers.
-RPIO.wait_for_interrupts(threaded=True)
-
-
-# Configure and start the webserver.
-logging.getLogger('waitress').setLevel(loglevel)
-bottle.run(server='waitress', host='0.0.0.0', port=80, quiet=(not args.debug), debug=args.debug)
+    # Start the thread that watches for events and calls the interrupt handlers.
+    RPIO.wait_for_interrupts(threaded=True)
 
 
-# Release the GPIO resources at exit.
-RPIO.cleanup()
+def cleanupgpio():
+    """Release all GPIO resources."""
+    RPIO.cleanup()
+
+
+def runwebserver():
+    """Set up and run the webserver. This routine does not return until process termination."""
+    logging.getLogger('waitress').setLevel(loglevel)
+    bottle.run(server='waitress', host='0.0.0.0', port=80, quiet=(not args.debug), debug=args.debug)
+
+
+# Start things up if running as the main module. Be sure to tidy up when done.
+if __name__ == '__main__':
+    try:
+        setupgpio()
+        runwebserver()
+    finally:
+        cleanupgpio()
