@@ -69,6 +69,10 @@ def cleanup():
     pass
 
 
+def cleanup_interrupts():
+    pass
+
+
 def _setclosed():
     _setpin(24, 1)
 

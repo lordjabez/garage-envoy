@@ -58,7 +58,8 @@ lastvibrationtime = 0.0
 
 
 def readhistory(num=0):
-    """Get state history items from.
+    """
+    Get state history items from.
     @param num: The number of items to read
     @return: List of state items
     """
@@ -71,7 +72,8 @@ def readhistory(num=0):
 
 
 def writehistory(state):
-    """Write a state item to the history file.
+    """
+    Write a state item to the history file.
     @param state: The state object to write
     """
     with open(HISTORY_FILENAME, 'a') as historyfile:
@@ -79,7 +81,8 @@ def writehistory(state):
 
 
 def updatestate(name):
-    """Update the current state.
+    """
+    Update the current state.
     @param name: The name of the new state
     """
     currstate = {'time': int(time.time() * 1000), 'name': name}
@@ -87,7 +90,8 @@ def updatestate(name):
 
 
 def evaluatestate(sensor, status):
-    """Determine the new state given a sensor event.
+    """
+    Determine the new state given a sensor event.
     @param sensor: The sensor event name
     @param status: The value of the sensor
     """
@@ -163,11 +167,22 @@ def handletrigger():
 
 @bottle.post('/_trigger')
 def posttrigger():
+    """
+    Trigger the garage door.
+    @return: 204 NO CONTENT if the door is triggered successfully
+             500 INTERNAL SERVER ERROR with an {error.json} document if an unknown problem occurs
+    """
+    bottle.response.status = 204
     handletrigger()
 
 
 @bottle.get('/history')
 def gethistory():
+    """
+    Get a list of states that represent door history.
+    @return: 200 OK with a {history.json} document if the data is fetched successfully
+             500 INTERNAL SERVER ERROR with an {error.json} document if an unknown problem occurs
+    """
     num = int(bottle.request.query.get('n') or 0)
     return {'history': readhistory(num)}
 
@@ -175,9 +190,32 @@ def gethistory():
 @bottle.get('/')
 @bottle.get('/<filename:path>')
 def getfile(filename='index.html'):
+    """
+    Serve static content to clients, setting the cache value to one year.
+    @param filename: The full path to the content being requested
+    @return: 200 OK with the content if retrieved successfully
+             404 NOT FOUND with an {error.json} document if the content is not available
+             500 INTERNAL SERVER ERROR with an {error.json} document if an unknown problem occurs
+    """
     response = bottle.static_file(filename, root='www')
     response.set_header('Cache-Control', 'max-age=31557600')
     return response
+
+
+@bottle.error(400)
+@bottle.error(404)
+@bottle.error(422)
+@bottle.error(500)
+@bottle.error(504)
+def _error(error):
+    """
+    Return an error message to clients.
+    @param error: The error message from an above function
+    @return: The appropriate error code with the {error.json} document
+    """
+    bottle.response.set_header('Cache-Control', 'no-cache')
+    bottle.response.set_header('Content-Type', 'application/json')
+    return json.dumps({'details': error.body})
 
 
 def setupgpio():
@@ -211,6 +249,7 @@ def setupgpio():
 
 def cleanupgpio():
     """Release all GPIO resources."""
+    RPIO.cleanup_interrupts()
     RPIO.cleanup()
 
 
