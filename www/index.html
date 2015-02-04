@@ -22,13 +22,13 @@
   <body ng-app="garageEnvoyApp">
 
   <ion-content padding="true" ng-controller="mainCtrl">
-      <button class="button button-block button-large button-positive" ng-click="triggerDoor()">{{triggerLabel}}</button>
-      <ion-list>
-          <ion-item ng-repeat="state in stateEvents | orderBy:'-time'">
-              <h2>{{state.name}}</h2>
-              <p>{{state.time | date:'medium'}}</p>
-              </ion-item>
-      </ion-list>
+    <button class="button button-block button-large button-positive" ng-disabled="!state" ng-click="triggerDoor()">{{triggerAction}}</button>
+    <ion-list ng-show="history">
+      <ion-item ng-repeat="state in history | orderBy:'-time'">
+        <h2>{{state.name}}</h2>
+        <p>{{state.time | date:'medium'}}</p>
+      </ion-item>
+    </ion-list>
   </ion-content>
 
   </body>
