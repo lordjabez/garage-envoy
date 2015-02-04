@@ -62,9 +62,12 @@ def readhistory(num=0):
     @param num: The number of items to read
     @return: List of state items
     """
-    with open(HISTORY_FILENAME, 'r') as historyfile:
-        history = [json.loads(line) for line in historyfile]
-    return history[-num:]
+    try:
+        with open(HISTORY_FILENAME, 'r') as historyfile:
+            history = [json.loads(line) for line in historyfile]
+        return history[-num:]
+    except OSError:
+        return []
 
 
 def writehistory(state):
