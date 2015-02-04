@@ -16,8 +16,6 @@ angular.module('garageEnvoyApp', ['ionic'])
 
 .controller('mainCtrl', ['$scope', '$http', '$timeout', function($scope, $http, $timeout) {
 
-  $scope.triggerLabel = 'Trigger Door';
-
   var pollTimeout;
 
   var schedulePoll = function(delay) {
@@ -29,7 +27,12 @@ angular.module('garageEnvoyApp', ['ionic'])
     $http.get('/history?n=20')
       .success(function(data) {
         $scope.history = data.history;
-        $scope.state = $scope.history.slice(-1)[0].name;
+        if ($scope.history.length) {
+          $scope.state = $scope.history.slice(-1)[0].name;
+        }
+        else {
+          delete $scope.state;
+        }
         switch ($scope.state) {
           case 'open':
           case 'half-open':
@@ -49,6 +52,8 @@ angular.module('garageEnvoyApp', ['ionic'])
             $scope.triggerAction = 'Reverse Door';
             schedulePoll(1000);
             break;
+          default:
+            schedulePoll(10000);
         }
       })
       .error(function() {
