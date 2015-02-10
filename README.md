@@ -11,6 +11,7 @@ Hardware
 - 5.25v DC power adapter
 - 5v two channel relay
 - magnetic sensors x 2
+- vibration sensor
 
 Software
 ========
