@@ -74,7 +74,7 @@
     // causes a state change, poll again almost right away.
     $scope.triggerDoor = function() {
       $http.post('/_trigger');
-      schedulePoll(500);
+      schedulePoll(1000);
     };
 
     // Get the ball rolling with an initial poll.
