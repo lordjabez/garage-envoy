@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import logging.handlers
+import threading
 import time
 
 # Additional library imports
@@ -47,14 +48,13 @@ else:
 currstate = {'name': None, 'time': 0.0}
 
 
-# Vibration is measured by checking the delta time between the
-# most recent and the previous statechange. If its less than this
-# threshold in seconds, the sensor is vibrating, otherwise it is not.
-VIBRATION_DELTA = 1.0
+# If no vibration events occur within this time
+# threshold, assume the door has stopped moving.
+VIBRATION_TIMEOUT = 3.0
 
-# Gotta remember the last vibration values for the above to work.
-lastvibrationstatus = False
-lastvibrationtime = 0.0
+
+# Stores the timout object that disables vibration.
+vibrationtimer = None
 
 
 def readhistory(num=0):
@@ -137,25 +137,30 @@ def handleclosed(id, value):
     logging.info('Closed sensor changed to ' + str(status))
 
 
+def setvibration(status=False):
+    """
+    Set the vibration value.
+    @param status: The new vibration status
+    """
+    evaluatestate('vibration', status)
+    logging.info('Vibration sensor changed to ' + str(status))
+
+
 def handlevibration(id, value):
     """
-    Process the change of the vibration sensor.
+    Process a vibration sensor event by cancelling and rescheduling
+    the disable event, and then setting vibration to true.
     @param id: The GPIO pin identifier for the sensor (ignored)
     @param value: The GPIO pin value (ignored)
     """
-    global lastvibrationstatus
-    global lastvibrationtime
-    # Determine the vibration state by checking to see how
-    # long it's been since the last vibration event. If the
-    # delta is small enough, the sensor is vibrating.
-    now = time.time()
-    status = (now - lastvibrationtime) < VIBRATION_DELTA
-    lastvibrationtime = now
-    # Only re-evaluate state if the vibration state actually changes.
-    if status != lastvibrationstatus:
-        lastvibrationstatus = status
-        evaluatestate('vibration', status)
-        logging.info('Vibration sensor changed to ' + str(status))
+    global vibrationtimer
+    try:
+        vibrationtimer.cancel()
+    except (AttributeError, RuntimeError):
+        pass
+    vibrationtimer = threading.Timer(VIBRATION_TIMEOUT, setvibration)
+    vibrationtimer.start()
+    setvibration(True)
 
 
 def handletrigger():
@@ -230,12 +235,12 @@ def setupgpio():
     RPIO.setup(TRIGGER_PIN, RPIO.OUT)
     RPIO.output(TRIGGER_PIN, True)
 
-    # Set up callbacks that fire when sensor state changes. Note the
-    # smaller debounce on the vibration pin. Using a larger value would
+    # Set up callbacks that fire when sensor state changes. Note there's
+    # no debounce value on the vibration pin, because using one would
     # suppress the very small changes the code is trying to detect.
     RPIO.add_interrupt_callback(OPEN_SENSOR, handleopen, debounce_timeout_ms=100)
     RPIO.add_interrupt_callback(CLOSED_SENSOR, handleclosed, debounce_timeout_ms=100)
-    RPIO.add_interrupt_callback(VIBRATION_SENSOR, handlevibration, debounce_timeout_ms=20)
+    RPIO.add_interrupt_callback(VIBRATION_SENSOR, handlevibration)
 
     # An additional setup call is required to ensure the pullup state
     # is set properly. Since the sensors are wired as normally closed
