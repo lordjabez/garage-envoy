@@ -22,7 +22,7 @@ HISTORY_FILENAME = 'history.log'
 TRIGGER_PIN = 17
 OPEN_SENSOR = 25
 CLOSED_SENSOR = 24
-VIBRATION_SENSOR = 28
+VIBRATION_SENSOR = 23
 
 
 # Parse the command line parameters.
@@ -153,6 +153,7 @@ def handlevibration(id, value):
     lastvibrationtime = now
     # Only re-evaluate state if the vibration state actually changes.
     if status != lastvibrationstatus:
+        lastvibrationstatus = status
         evaluatestate('vibration', status)
         logging.info('Vibration sensor changed to ' + str(status))
 
